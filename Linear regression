@@ -1,0 +1,142 @@
+import pandas as pd
+import numpy as np
+import plotly.express as px
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.utils import resample
+from imblearn.over_sampling import SMOTE
+import pickle
+import shap
+
+# Load the dataset
+# Replace 'road_accidents.csv' with the path to your dataset
+data = pd.read_excel('/content/road_accident_severity_dataset.xlsx')
+
+# Display the first few rows of the dataset
+print(data.head())
+
+# Feature selection: Include additional relevant features
+# Example features: 'Weather', 'Time_of_Day', 'Road_Type', 'Traffic_Density', 'Driver_Age', 'Vehicle_Type'
+X = data[['Weather', 'Time_of_Day', 'Road_Type', 'Traffic_Density', 'Driver_Age', 'Vehicle_Type']]
+y = data['Severity']
+
+# Handle missing values (if any)
+
+for col in X.select_dtypes(include=np.number).columns:
+    X[col] = X[col].fillna(X[col].median())
+# Impute missing values for categorical features with the most frequent value
+for col in X.select_dtypes(include=['object']).columns:
+    X[col] = X[col].fillna(X[col].mode()[0])
+
+#X = X.fillna(X.median())
+
+# One-hot encode categorical variables
+X = pd.get_dummies(X, drop_first=True)
+
+# Handling data imbalance using SMOTE
+smote = SMOTE(random_state=42, k_neighbors=1)
+X_resampled, y_resampled = smote.fit_resample(X, y)
+
+# Split the dataset into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X_resampled, y_resampled, test_size=0.2, random_state=42)
+
+# Model selection: Using Random Forest for better performance
+model = RandomForestRegressor(random_state=42)
+
+# Hyperparameter tuning using GridSearchCV
+param_grid = {
+    'n_estimators': [100, 200],
+    'max_depth': [10, 20, 30],
+    'min_samples_split': [2, 5],
+    'min_samples_leaf': [1, 2]
+}
+
+grid_search = GridSearchCV(estimator=model, param_grid=param_grid, cv=5, scoring='neg_mean_squared_error', verbose=2, n_jobs=-1)
+grid_search.fit(X_train, y_train)
+
+# Best model after GridSearch
+best_model = grid_search.best_estimator_
+
+# Cross-validation for model evaluation
+cv_scores = cross_val_score(best_model, X_train, y_train, cv=5, scoring='r2')
+print(f'Cross-validation R2 scores: {cv_scores}')
+print(f'Mean cross-validation R2 score: {np.mean(cv_scores)}')
+
+# Make predictions
+y_pred = best_model.predict(X_test)
+
+# Model evaluation
+mse = mean_squared_error(y_test, y_pred)
+r2 = r2_score(y_test, y_pred)
+
+print(f'Mean Squared Error: {mse}')
+print(f'R-squared: {r2}')
+
+# Save the model for future use
+with open('random_forest_model.pkl', 'wb') as f:
+    pickle.dump(best_model, f)
+
+# Example of predicting severity for a hypothetical scenario
+# Let's assume we have new data to predict severity:
+new_data = pd.DataFrame({
+    'Weather': ['Rainy'], 
+    'Time_of_Day': ['Night'], 
+    'Road_Type': ['Highway'], 
+    'Traffic_Density': [200], 
+    'Driver_Age': [25], 
+    'Vehicle_Type': ['Sedan']
+})
+
+# Encode the new data
+new_data = pd.get_dummies(new_data, drop_first=True)
+
+# Align new data with the training data columns
+new_data = new_data.reindex(columns=X.columns, fill_value=0)
+
+# Predict the accident severity for this new case
+predicted_severity = best_model.predict(new_data)
+print(f'Predicted Accident Severity: {predicted_severity[0]}')
+
+# Explainability using SHAP (Optional for interpretability)
+explainer = shap.TreeExplainer(best_model)
+shap_values = explainer.shap_values(X_test)
+
+# Plot the SHAP values for interpretation
+shap.summary_plot(shap_values, X_test)
+
+df = pd.read_excel("/content/road_accident_severity_dataset.xlsx")
+
+df.head()
+
+df.isnull().sum()
+
+!pip install plotly
+import plotly.express as px
+#ps.histogram(df,df['Day_of_week'],df['Number_of_casualties'],color='Day_of_week',template='ggplot2')
+fig = px.histogram(df, 
+                   x="Weather",  # Use column name as a string for x-axis
+                   y="Severity",  # Use column name as a string for y-axis
+                   color="Weather", 
+                   template="ggplot2")
+fig.show()
+
+import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
+import numpy as np
+
+
+
+y_pred = np.round(y_pred).astype(int)  # Round to nearest integer and convert to integer type
+# Create the confusion matrix
+cm = confusion_matrix(y_test, y_pred)
+
+# Plot the confusion matrix
+plt.figure(figsize=(8, 6))
+sns.heatmap(cm, annot=True, cmap='Blues', fmt='g',
+            xticklabels=range(3), yticklabels=range(3))
+plt.xlabel('Predicted')
+plt.ylabel('True')
+plt.title('Confusion Matrix')
+plt.show()
